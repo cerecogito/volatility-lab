@@ -1,106 +1,129 @@
 # Volatility Lab
 
-**Does explicitly modelling uncertainty in volatility improve option-price estimates or reduce
-hedging risk compared with conventional volatility estimates, when evaluated out of sample?**
+Volatility is the one Black-Scholes input you can't observe. You estimate it from past returns,
+and that estimate is noisy. With 60 days of data, a "60% vol" could easily be 50% or 70%. So I
+wanted to answer a simple question properly:
 
-This is an educational, offline research project:
+**If I carry that uncertainty into the option price instead of plugging in a single number, do I
+get better prices or safer hedges?**
 
-- a tested option-pricing engine (CRR binomial, Black–Scholes–Merton and Greeks, implied vol,
-  Monte Carlo with variance reduction);
-- three volatility estimators: rolling, EWMA and a conjugate Normal–Inverse-Gamma Bayesian model
-  whose option price is averaged over the posterior;
-- an optional two-state Markov regime model;
-- a delta-hedging simulator;
-- paired, chronologically split statistical evaluation.
+To find out, I built an option-pricing engine from scratch, three ways of estimating volatility
+(plus an optional regime model), and a delta-hedging simulator. I tested all of them out of
+sample with proper statistics.
 
-It has two clearly separated evidence tracks:
+## What's inside
 
-| Track | Data | Label used everywhere |
+- **Pricing engine:** CRR binomial trees (European and American), Black-Scholes-Merton with all
+  the Greeks, an implied-vol solver using Brent's method, and Monte Carlo with antithetic and
+  control-variate variance reduction.
+- **Volatility models:**
+  - rolling historical vol;
+  - EWMA;
+  - a conjugate Normal-Inverse-Gamma Bayesian model. Its option price is averaged over the whole
+    posterior instead of using a point estimate.
+  - a two-state Markov regime model, fitted with EM.
+- **Hedging simulator:** sells an option, delta hedges it with transaction costs, and measures
+  what's left at expiry.
+- **Statistics:** chronological train, validation and test splits; leak-proof joins between
+  trades and data; date-clustered bootstrap; Diebold-Mariano tests; Holm corrections.
+
+I tested everything in two separate tracks and never mixed them:
+
+| Track | What it uses | What it can tell me |
 |---|---|---|
-| A | Simulated paths from known models (true prices known) | **simulated** |
-| B | Real Deribit BTC option trades and the BTC index (free public API) | **historical** / **hypothetical hedge on historical paths** |
+| A: simulation | paths from models where I know the true price | whether a method works when its assumptions hold |
+| B: real market | Deribit BTC option trades and the BTC index (free public API) | how close each model gets to actual traded prices |
 
-No live trading, broker connections or real transactions. Nothing here is a trading strategy.
+No live trading, no broker connections, no real money. This is a research project, not a
+trading strategy.
 
-**Results are generated locally and not published here.** They are aggregate statistics
-derived from Deribit market data, and Deribit's terms restrict that to personal use. Running the
-pipeline (below) produces `reports/results_summary.md`, `reports/final_research_report.md`,
-`reports/cv_evidence.json`, the data-feasibility audit and the charts. See
-[`reports/README.md`](reports/README.md).
+## What I found
 
-## Install
+- **In simulation, modelling uncertainty helps, but only a little.** The posterior-averaged price
+  beat the rolling estimate in all 18 scenario cells I tested. The gain was 0.4% to 6.4% of
+  pricing RMSE, and biggest with short histories. The reason is neat: a plug-in volatility
+  estimate is biased low in small samples, so at-the-money options come out too cheap.
+  Averaging over the posterior removes most of that bias.
+- **For hedging, the effect is tiny.** It was at most about 1.6% of hedging RMSE. Most hedging
+  risk comes from rebalancing in discrete steps and from volatility actually changing, not from
+  parameter uncertainty.
+- **On real BTC trades the story is more humbling.** The Bayesian model beat a rolling estimator,
+  but almost all of that gain came from the prior pulling volatility upwards, not from the
+  uncertainty modelling. It also didn't beat a well-tuned EWMA. The gap that matters is between
+  historical and implied volatility, and that's a risk premium. No amount of statistics on past
+  returns explains it.
+- **The regime model was a clear miss out of sample.** I kept that result in on purpose.
 
-Requires [uv](https://docs.astral.sh/uv/). It installs Python 3.12 and the pinned
-dependencies from `uv.lock`: numpy, scipy, pandas, matplotlib, and pytest for tests.
+The engine itself is validated against textbook values, worked examples from my Caltech course
+notes, numerical integration and finite-difference Greeks, with 101 tests in total. The control
+variate cut Monte Carlo variance about 4x, and the 95% confidence intervals hit 94% to 96%
+coverage over 1,000 repeats.
+
+## Running it
+
+You need [uv](https://docs.astral.sh/uv/). It sets up Python 3.12 and the pinned dependencies
+from `uv.lock`.
 
 ```bash
 cd volatility-lab
 uv sync
-```
 
-## Reproduce
-
-```bash
-uv run python scripts/00_check_sources.py         # are the free sources reachable?
-uv run python scripts/01_download_data.py --sample-only   # bounded pilot (4 hourly windows)
-uv run python scripts/01_download_data.py         # full bounded sample: 353 windows (~5 min, resumable)
-uv run python scripts/02_build_dataset.py         # verify checksums, clean, split -> data/processed/
-uv run python scripts/03_validate_math.py         # runs math tests first, then numerical validation
-uv run python scripts/04_track_a_simulation.py    # simulated pricing + hedging (~6 min)
-uv run python scripts/05_track_b_market_pricing.py  # validation selection, then test evaluation
+uv run python scripts/00_check_sources.py              # check the free data sources are up
+uv run python scripts/01_download_data.py --sample-only # small pilot download
+uv run python scripts/01_download_data.py              # full sample, 353 one-hour windows (resumable)
+uv run python scripts/02_build_dataset.py              # verify checksums, clean, split
+uv run python scripts/03_validate_math.py              # math tests first, then numerical checks
+uv run python scripts/04_track_a_simulation.py         # simulated pricing and hedging
+uv run python scripts/05_track_b_market_pricing.py     # validation selection, then the test set
 uv run python scripts/06_track_b_historical_hedging.py
-uv run python scripts/07_make_report.py           # charts, results_summary.md, cv_evidence.json, report
-uv run pytest                                     # 101 tests
+uv run python scripts/07_make_report.py                # charts, summary, CV evidence
+uv run pytest
 ```
 
-Or run every step after the download with `uv run python scripts/run_all.py` (add `--download` to
-fetch the data too).
-
-All settings (sample days, filters, split dates, candidate hyper-parameters, seeds) are in
+Once the data is downloaded, `uv run python scripts/run_all.py` runs everything in one go. Every
+setting (sample days, filters, split dates, candidate parameters, seeds) lives in
 [`configs/experiment.toml`](configs/experiment.toml).
 
-## Repository layout
+## Why the results aren't in this repo
 
-```
-src/volatility_lab/     reusable modules
-  black_scholes.py      BSM prices, Greeks, no-arbitrage bounds
-  binomial.py           CRR tree (European/American)
-  implied_vol.py        Brent implied vol with reason codes; implied forward
-  monte_carlo.py        plain / antithetic / control-variate MC with CIs
-  volatility_estimators.py  rolling, EWMA, realised vol
-  bayesian.py           Normal-Inverse-Gamma posterior, predictive, posterior-averaged price and delta
-  regime_model.py       2-state Gaussian HMM (EM, filter, forecasts)
-  pricing_models.py     the competing models + leak-proof trade/fixing join
-  hedging.py            discrete delta-hedge accounting with costs
-  simulation.py         GBM and regime-switching path simulators
-  metrics.py, stat_tests.py   error metrics, VaR/ES, cluster bootstrap, Diebold-Mariano, Holm
-  data_download.py, data_processing.py, splits.py, config.py, reporting.py
-scripts/                numbered, reproducible steps (00-07) + run_all.py
-tests/                  101 tests (formulas, invariants, leakage, data, reports)
-docs/                   methodology, data dictionary, evaluation protocol, limitations, interview prep
-references/             course concept map, Caltech notes README (notes not included)
-reports/                generated locally, git-ignored (see reports/README.md)
-data/raw, data/processed   git-ignored (Deribit terms: personal use only)
-```
+The market data comes from Deribit's public API, and their terms say market data and anything
+derived from it is for personal use only. So the data and the generated reports stay on my
+machine. Run the pipeline and you'll get the full reports locally; see
+[`reports/README.md`](reports/README.md).
 
-## Data and licensing
+Before settling on Deribit I checked a bunch of other free sources:
 
-Market data come from Deribit's public endpoints (`history.deribit.com` trades and
-`get_delivery_prices`), with no account required. Deribit's terms say market data and derived
-data are for **personal use only**. So neither the data nor the generated reports (which
-contain aggregate statistics derived from it) are committed.
-
-Free sources investigated during the data audit and not used:
-
-| Source | Reason not used |
+| Source | Why I didn't use it |
 |---|---|
-| Tardis.dev free first-of-month Deribit files | Blocked by a browser challenge from this environment (not bypassed) |
-| Cboe DataShop option EOD data | Paid; no free sample found |
-| OptionMetrics IvyDB (WRDS) | Needs an institutional login |
-| Yahoo Finance option chains | Current snapshot only, no history |
-| Kaggle community option datasets | Need a login; unclear provenance and licence |
-| Stooq daily equity prices | Behind a JavaScript proof-of-work check (not bypassed) |
-| FRED (VIX, S&P 500, T-bills) | Available, but not needed for the final BTC design |
+| Tardis.dev free monthly Deribit files | blocked by a browser challenge, and I wasn't going to bypass it |
+| Cboe DataShop | paid, with no free sample |
+| OptionMetrics (WRDS) | needs an institutional login |
+| Yahoo Finance option chains | current snapshot only, no history |
+| Kaggle option datasets | need a login, and the licensing is unclear |
+| Stooq daily prices | behind a JavaScript proof-of-work check |
+| FRED (VIX, S&P 500, T-bills) | worked fine, but my final design didn't need it |
 
-Course materials are not redistributed. See `references/course_concept_map.md` for how the
-Caltech and MIT courses informed each method, and which materials were actually accessible.
+## Layout
+
+```
+src/volatility_lab/       the library
+  black_scholes.py        prices, Greeks, no-arbitrage bounds
+  binomial.py             CRR trees
+  implied_vol.py          Brent solver with reason codes, implied forward
+  monte_carlo.py          plain, antithetic and control-variate MC
+  volatility_estimators.py  rolling, EWMA, realised vol
+  bayesian.py             NIG posterior, predictive, posterior-averaged price and delta
+  regime_model.py         two-state Gaussian HMM
+  pricing_models.py       the competing models and the leak-proof join
+  hedging.py              delta-hedge accounting with costs
+  simulation.py           GBM and regime-switching paths
+  metrics.py, stat_tests.py  errors, VaR/ES, cluster bootstrap, Diebold-Mariano, Holm
+scripts/                  numbered pipeline steps 00 to 07, plus run_all.py
+tests/                    101 tests
+docs/                     methodology, data dictionary, evaluation protocol, limitations
+references/               how my course material maps to each method
+```
+
+The theory side draws on Caltech's *Pricing Options with Mathematical Models* and MIT's
+probability and statistics courses. `references/course_concept_map.md` shows which idea went
+where.
