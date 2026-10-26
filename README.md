@@ -104,10 +104,3 @@ Free sources investigated during the data audit and not used:
 
 Course materials are not redistributed. See `references/course_concept_map.md` for how the
 Caltech and MIT courses informed each method, and which materials were actually accessible.
-
-## AI assistance
-
-This project was implemented with help from an AI coding assistant (Claude), which wrote much
-of the code, tests and documentation under the author's direction. AI assistance does not
-replace understanding. Every result should be re-derived, re-run and explained by the author.
-`docs/interview_preparation.md` lists questions for checking that understanding.
