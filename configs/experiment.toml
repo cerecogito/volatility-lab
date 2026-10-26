@@ -1,0 +1,62 @@
+# Volatility Lab experiment configuration.
+# Every script reads this file, so the whole study is defined in one place.
+
+experiment_id = "vlab-2026-10-v1"
+
+[data]
+index_name = "btc_usd"
+currency = "BTC"
+# option trades are sampled in a one hour window on every Wednesday.
+# 08:00 UTC is when the daily index delivery price is fixed, so at 08:00-09:00
+# that day's delivery price is already known (no look-ahead).
+first_sample_day = "2020-01-01"
+last_sample_day = "2026-09-30"
+sample_weekday = 2           # Monday = 0, so 2 = Wednesday
+window_start_hour_utc = 8
+window_end_hour_utc = 9
+# bounded pilot sample used for the feasibility audit
+pilot_days = ["2020-06-03", "2022-06-01", "2024-06-05", "2026-06-03"]
+
+[filters]
+# documented cleaning rules for option trades (see docs/data_dictionary.md)
+min_days_to_expiry = 3.0
+max_days_to_expiry = 180.0
+min_price_btc = 0.0005        # 5 ticks; cheaper trades are mostly noise
+max_abs_log_moneyness = 0.5   # |ln(K/F)| <= 0.5
+min_reported_iv = 5.0         # percent
+max_reported_iv = 300.0       # percent
+max_abs_annual_basis = 0.5    # |ln(F/S)/T| above this = forward looks broken
+
+[splits]
+# chronological splits (decided after looking only at the date coverage)
+# development = used for building/debugging the pipeline, exploratory only
+development_start = "2020-01-01"
+development_end = "2021-12-31"
+validation_start = "2022-01-01"
+validation_end = "2023-12-31"
+test_start = "2024-01-01"
+test_end = "2026-09-30"
+# the Bayesian prior and the regime model are fitted on index returns up to:
+prior_training_end = "2021-12-31"
+
+[volatility]
+days_per_year = 365.0              # BTC trades every calendar day
+rolling_windows = [30, 60, 90, 180]  # candidate lookbacks (days), picked on validation
+ewma_lambdas = [0.90, 0.94, 0.97, 0.99]
+# Bayesian Normal-Inverse-Gamma prior: strength = pseudo-observations
+prior_strengths = [2.0, 10.0, 30.0, 100.0]
+prior_scale_multipliers = [0.5, 1.0, 2.0]   # prior variance = multiplier * training variance
+posterior_quadrature_nodes = 64
+
+[hedging_historical]
+maturity_days = 30
+rebalance_every_days = 1
+transaction_cost_rate = 0.0005   # 5 bp of traded notional
+start_every_days = 7
+
+[simulation]
+master_seed = 20261025
+mc_validation_paths = 100000
+mc_coverage_repeats = 1000
+mc_coverage_paths = 5000
+history_days = 90

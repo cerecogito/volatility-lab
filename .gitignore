@@ -1,0 +1,28 @@
+# python stuff
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# data is never committed (Deribit terms: personal use only, see reports/data_feasibility.md)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# course materials are copyrighted - keep them local only
+references/caltech/*
+!references/caltech/README.md
+
+# generated reports contain aggregate figures derived from Deribit market data, which
+# Deribit's terms restrict to personal use - so they stay local (regenerate with scripts/run_all.py)
+reports/*
+!reports/README.md
+
+# editor junk
+.vscode/
+.idea/
+.DS_Store
